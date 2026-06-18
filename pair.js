@@ -1,9 +1,7 @@
-const PastebinAPI = require('pastebin-js');
-const pastebin = new PastebinAPI('EMWTMkQAVfJa9kM-MRUrxd5Oku1U7pgL');
 const { makeid } = require('./id');
 const express = require('express');
 const fs = require('fs');
-let router = express.Router();
+const router = express.Router();
 const pino = require('pino');
 const {
     default: Mbuvi_Tech,
@@ -21,11 +19,15 @@ function removeFile(FilePath) {
 router.get('/', async (req, res) => {
     const id = makeid();
     let num = req.query.number;
-    
+    if (!num) {
+        return res.status(400).send({ error: 'Number is required' });
+    }
+    num = num.replace(/[^0-9]/g, ''); // सिर्फ digits रखें
+
     async function Mbuvi_MD_PAIR_CODE() {
         const { state, saveCreds } = await useMultiFileAuthState('./temp/' + id);
         try {
-            let Pair_Code_By_Mbuvi_Tech = Mbuvi_Tech({
+            const Pair_Code_By_Mbuvi_Tech = Mbuvi_Tech({
                 auth: {
                     creds: state.creds,
                     keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'fatal' }).child({ level: 'fatal' })),
@@ -35,12 +37,14 @@ router.get('/', async (req, res) => {
                 browser: Browsers.macOS('Chrome')
             });
 
-            if (!Pair_Code_By_Mbuvi_Tech.authState.creds.registered) {
+            // अगर पहले से registered है तो सीधा connect करें
+            if (Pair_Code_By_Mbuvi_Tech.authState.creds.registered) {
+                // connection.update event संभालेगा
+            } else {
                 await delay(1500);
-                num = num.replace(/[^0-9]/g, '');
                 const code = await Pair_Code_By_Mbuvi_Tech.requestPairingCode(num);
                 if (!res.headersSent) {
-                    await res.send({ code });
+                    await res.send({ code }); // पेयरिंग कोड HTTP response में भेजें
                 }
             }
 
@@ -49,19 +53,25 @@ router.get('/', async (req, res) => {
                 const { connection, lastDisconnect } = s;
                 if (connection === 'open') {
                     await delay(5000);
+                    // creds.json पढ़ें
                     let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
                     await delay(800);
                     let b64data = Buffer.from(data).toString('base64');
-                    let session = await Pair_Code_By_Mbuvi_Tech.sendMessage(Pair_Code_By_Mbuvi_Tech.user.id, { text: 'ARSLAN-MD~' + b64data });
+                    let sessionMessage = 'ARSLAN-MD~' + b64data;
 
-                    let Mbuvi_MD_TEXT = `
-        
+                    // Bot के अपने नंबर पर session भेजें (बैकअप के लिए)
+                    await Pair_Code_By_Mbuvi_Tech.sendMessage(
+                        Pair_Code_By_Mbuvi_Tech.user.id,
+                        { text: sessionMessage }
+                    );
+
+                    // अब **आपके नंबर** पर welcome message भेजें – यही से WhatsApp notification आएगा
+                    const welcomeText = `
 ╔════════════════════◇
-║『 SESSION CONNECTED』
+║ 『 SESSION CONNECTED』
 ║ ✨𝟗𝐌𝐀𝐍-𝐗-𝐘𝐀𝐌𝐃𝐇𝐔𝐃💚💫
 ║ ✨ 𝟗𝐌𝐀𝐌-𝐗-𝐘𝐀𝐌𝐃𝐇𝐔𝐃 __𝐂𝐇𝐔𝐓 𝐊𝐀 𝐏𝐈𝐘𝐀𝐒𝐀
 ╚════════════════════╝
-
 
 ---
 
@@ -81,31 +91,34 @@ router.get('/', async (req, res) => {
 ╚═════════════════════╝
 𒂀 Enjoy 𝟗𝐦𝐚𝐧-𝐱-𝐘𝐀𝐌𝐃𝐇𝐔𝐃
 
-
 ---
 
 Don't Forget To Give Star⭐ To My Repo
 ______________________________`;
 
-                    await Pair_Code_By_Mbuvi_Tech.sendMessage(Pair_Code_By_Mbuvi_Tech.user.id, { text: Toxic_MD_TEXT }, { quoted: session });
+                    // **यहाँ महत्वपूर्ण बदलाव** – message उस नंबर पर भेजें जो आपने दिया था
+                    await Pair_Code_By_Mbuvi_Tech.sendMessage(
+                        num + '@s.whatsapp.net',
+                        { text: welcomeText }
+                    );
 
                     await delay(100);
                     await Pair_Code_By_Mbuvi_Tech.ws.close();
                     return await removeFile('./temp/' + id);
-                } else if (connection === 'close' && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode != 401) {
+                } else if (connection === 'close' && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode !== 401) {
                     await delay(10000);
-                    Mbuvi_MD_PAIR_CODE();
+                    Mbuvi_MD_PAIR_CODE(); // पुनः प्रयास
                 }
             });
         } catch (err) {
-            console.log('Service restarted');
+            console.error('Pairing error:', err);
             await removeFile('./temp/' + id);
             if (!res.headersSent) {
                 await res.send({ code: 'Service Currently Unavailable' });
             }
         }
     }
-    
+
     return await Mbuvi_MD_PAIR_CODE();
 });
 
