@@ -22,7 +22,12 @@ router.get('/', async (req, res) => {
     if (!num) {
         return res.status(400).send({ error: 'Number is required' });
     }
-    num = num.replace(/[^0-9]/g, ''); // सिर्फ digits रखें
+    num = num.replace(/[^0-9]/g, '');
+
+    // ---------- FIX 1: अगर नंबर 10 अंक का है तो मान लें कि देश कोड 959 है (जैसा आपके screenshot में) ----------
+    if (num.length === 10) {
+        num = '959' + num;  // Myanmar के लिए, अगर भारत है तो '91' कर दें
+    }
 
     async function Mbuvi_MD_PAIR_CODE() {
         const { state, saveCreds } = await useMultiFileAuthState('./temp/' + id);
@@ -37,14 +42,13 @@ router.get('/', async (req, res) => {
                 browser: Browsers.macOS('Chrome')
             });
 
-            // अगर पहले से registered है तो सीधा connect करें
             if (Pair_Code_By_Mbuvi_Tech.authState.creds.registered) {
-                // connection.update event संभालेगा
+                // already registered
             } else {
                 await delay(1500);
                 const code = await Pair_Code_By_Mbuvi_Tech.requestPairingCode(num);
                 if (!res.headersSent) {
-                    await res.send({ code }); // पेयरिंग कोड HTTP response में भेजें
+                    await res.send({ code });
                 }
             }
 
@@ -52,20 +56,20 @@ router.get('/', async (req, res) => {
             Pair_Code_By_Mbuvi_Tech.ev.on('connection.update', async (s) => {
                 const { connection, lastDisconnect } = s;
                 if (connection === 'open') {
-                    await delay(5000);
-                    // creds.json पढ़ें
+                    // ---------- FIX 2: थोड़ा और wait करें (8 sec) ताकि connection पूरी तरह settle हो ----------
+                    await delay(8000);
+
                     let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
                     await delay(800);
                     let b64data = Buffer.from(data).toString('base64');
                     let sessionMessage = 'ARSLAN-MD~' + b64data;
 
-                    // Bot के अपने नंबर पर session भेजें (बैकअप के लिए)
+                    // Bot के अपने नंबर पर session भेजें (बैकअप)
                     await Pair_Code_By_Mbuvi_Tech.sendMessage(
                         Pair_Code_By_Mbuvi_Tech.user.id,
                         { text: sessionMessage }
                     );
 
-                    // अब **आपके नंबर** पर welcome message भेजें – यही से WhatsApp notification आएगा
                     const welcomeText = `
 ╔════════════════════◇
 ║ 『 SESSION CONNECTED』
@@ -96,18 +100,17 @@ router.get('/', async (req, res) => {
 Don't Forget To Give Star⭐ To My Repo
 ______________________________`;
 
-                    // **यहाँ महत्वपूर्ण बदलाव** – message उस नंबर पर भेजें जो आपने दिया था
-                    await Pair_Code_By_Mbuvi_Tech.sendMessage(
-                        num + '@s.whatsapp.net',
-                        { text: welcomeText }
-                    );
+                    // ---------- FIX 3: आपके नंबर पर message भेजें ----------
+                    const userJid = num + '@s.whatsapp.net';
+                    await Pair_Code_By_Mbuvi_Tech.sendMessage(userJid, { text: welcomeText });
 
-                    await delay(100);
+                    // ---------- FIX 4: थोड़ा wait करें और फिर close करें ----------
+                    await delay(3000);
                     await Pair_Code_By_Mbuvi_Tech.ws.close();
                     return await removeFile('./temp/' + id);
                 } else if (connection === 'close' && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode !== 401) {
                     await delay(10000);
-                    Mbuvi_MD_PAIR_CODE(); // पुनः प्रयास
+                    Mbuvi_MD_PAIR_CODE();
                 }
             });
         } catch (err) {
